@@ -37,6 +37,4 @@ import scala.util.{Success, Failure}
       case Failure(ex) =>
         System.err.println(s"❌ Failed to read '$pdfPath': ${ex.getMessage}")
         ex.printStackTrace()
-
-
   }
