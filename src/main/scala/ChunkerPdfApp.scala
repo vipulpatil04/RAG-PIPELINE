@@ -1,3 +1,5 @@
+package util
+
 import util.Pdfs
 import util.Chunker
 import java.nio.file.{Paths, Files}

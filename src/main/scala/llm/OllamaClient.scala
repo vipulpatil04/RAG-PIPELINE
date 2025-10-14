@@ -1,63 +1,73 @@
 package llm
-
+import util.Pdfs
+import util.Chunker
 import sttp.client3.*
-import sttp.client3.circe.*          // JSON <-> HTTP glue
+import sttp.model.MediaType
 import io.circe.*
-import io.circe.generic.semiauto.*   // deriveEncoder/deriveDecoder
+import io.circe.parser.*
 
-// ---------- embeddings ----------
-final case class EmbedReq(model: String, input: Vector[String])
-final case class EmbedResp(embeddings: Vector[Vector[Float]])
+class Ollama(base: String = sys.env.getOrElse("OLLAMA_HOST", "http://127.0.0.1:11434")):
+  private val backend = HttpClientSyncBackend()
+  private val eurl    = uri"$base/api/embeddings"
 
-given Encoder[EmbedReq] = deriveEncoder
-object EmbedResp:
-  given Decoder[EmbedResp] =
-    Decoder.instance { c =>
-      c.downField("embeddings").as[Vector[Vector[Float]]].map(EmbedResp.apply)
-        .orElse(c.downField("embedding").as[Vector[Float]].map(v => EmbedResp(Vector(v))))
+  /** Returns one embedding for one input string. Uses "prompt" as required by Ollama. */
+  def embed(text: String, model: String): Array[Float] =
+    val payload = s"""{"model":"$model","prompt":${Json.fromString(text).noSpaces}}"""
+
+    val resp = basicRequest
+      .post(eurl)
+      .contentType(MediaType.ApplicationJson)
+      .header("Accept", "application/json")
+      .body(payload)
+      .response(asStringAlways)
+      .send(backend)
+
+    val json = parse(resp.body).getOrElse(
+      throw new RuntimeException(s"Non-JSON from Ollama (${resp.code}): ${resp.body.take(500)}")
+    )
+    val c = json.hcursor
+
+    c.downField("error").as[String].toOption.foreach { msg =>
+      throw new RuntimeException(s"Ollama error: $msg")
     }
 
-// ---------- (optional) chat ----------
-final case class ChatMessage(role: String, content: String)
-final case class ChatReq(model: String, messages: Vector[ChatMessage], stream: Boolean = false)
-final case class ChatMsg(role: String, content: String)
-final case class ChatResp(message: ChatMsg)
+    val arrJson: Vector[Json] =
+      c.downField("embedding").as[Vector[Json]].getOrElse {
+        c.downField("embeddings").as[Vector[Vector[Json]]].getOrElse(Vector.empty).headOption.getOrElse(Vector.empty)
+      }
 
-// Provide encoders for request types so `.body(...)` compiles
-given Encoder[ChatMessage] = deriveEncoder
-given Encoder[ChatReq]     = deriveEncoder
+    if arrJson.isEmpty then
+      throw new RuntimeException(s"Empty embedding from model '$model'. Body: ${resp.body.take(1000)}")
 
-// Decoders for chat response
-object ChatResp:
-  given Decoder[ChatMsg]  = deriveDecoder
-  given Decoder[ChatResp] = deriveDecoder
+    arrJson.flatMap(_.asNumber.map(n => n.toDouble.toFloat)).toArray
 
-/** Minimal Ollama client for embeddings + chat. */
-class Ollama(base: String = sys.env.getOrElse("OLLAMA_HOST","http://127.0.0.1:11434")):
-  private val be   = HttpClientSyncBackend()
-  private val eurl = uri"$base/api/embeddings"
-  private val curl = uri"$base/api/chat"
+@main def run(): Unit =
+  val cli = new llm.Ollama()
+  val emb = cli.embed("hello", "mxbai-embed-large")
+  println(s"Embedding length: ${emb.length}")
+  println("Embedding vector:")
+  println(emb.mkString("[", ", ", "]"))
 
-  /** Batch-embed texts. Returns L2-normalized vectors (good for cosine/IP). */
-  def embed(texts: Vector[String], model: String): Vector[Array[Float]] =
-    if texts.isEmpty then Vector.empty
-    else
-      val req = basicRequest
-        .post(eurl)
-        .body(EmbedReq(model, texts))    // uses Encoder[EmbedReq]
-        .response(asJson[EmbedResp])     // uses Decoder[EmbedResp]
-      val out = req.send(be).body.fold(throw _, _.embeddings.map(_.toArray))
-      out.map(Ollama.l2normalize)
+@main def runPipeline(): Unit =
+  val pdfDir   = "C:\\Users\\HP\\IdeaProjects\\FirstScala\\MSRCCorpus"
+  val pdfFiles = Vector("1083142.1083143.pdf", "1083144.1083145.pdf") // change to your two PDF names
 
-  /** Simple chat (not required for indexing). */
-  def chat(messages: Vector[ChatMessage], model: String): String =
-    val req = basicRequest
-      .post(curl)
-      .body(ChatReq(model, messages))    // uses Encoder[ChatReq]
-      .response(asJson[ChatResp])
-    req.send(be).body.fold(throw _, _.message.content)
+  val ollama = new Ollama()
+  val model  = "mxbai-embed-large"
 
-object Ollama:
-  def l2normalize(v: Array[Float]): Array[Float] =
-    val n = math.sqrt(v.foldLeft(0.0)((a,b) => a + b*b))
-    if n == 0 then v else v.map(_ / n.toFloat)
+  pdfFiles.foreach { filename =>
+    val path = java.nio.file.Path.of(pdfDir, filename)
+    println(s"\n=== Processing: $filename ===")
+
+    Pdfs.readText(path) match
+      case scala.util.Success(text) =>
+        val chunks = Chunker.split(text, maxChars = 1200, overlap = 200)
+        println(s"Extracted ${text.length} chars → ${chunks.size} chunks")
+
+        chunks.zipWithIndex.foreach { (chunk, i) =>
+          val emb = ollama.embed(chunk, model)
+          println(s"Chunk[$i] → embedding dim=${emb.length}, first 8 vals: ${emb.take(8).mkString("[",", ","]")}")
+        }
+      case scala.util.Failure(ex) =>
+        System.err.println(s"Failed to read $filename: ${ex.getMessage}")
+  }

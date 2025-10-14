@@ -6,7 +6,7 @@ object Chunker:
     s.replaceAll("\\s+"," ").trim
 
   /**
-   * Split text into chunks of up to `maxChars` with overlap `overlap`.
+   * Split text into chunks of up to `maxChars` with overlap.
    * Tries to cut at a sentence boundary when possible.
    */
   def split(s: String, maxChars: Int = 1800, overlap: Int = 250): Vector[String] =
