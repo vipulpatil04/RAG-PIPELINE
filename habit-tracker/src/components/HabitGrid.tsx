@@ -55,8 +55,13 @@ function getDates(view: ViewType): string[] {
   return dates;
 }
 
+function parseLocalDate(dateStr: string): Date {
+  const [year, month, day] = dateStr.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
 function getDayLabel(dateStr: string, view: ViewType): string {
-  const date = new Date(dateStr + "T00:00:00");
+  const date = parseLocalDate(dateStr);
   if (view === "weekly") {
     return date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
   }
@@ -188,7 +193,7 @@ export function HabitGrid({ habits, view, onEditHabit, onDeleteHabit }: Props) {
                 </div>
                 <div className="flex gap-3 flex-wrap">
                   {Object.entries(monthGroups).map(([month, mDates]) => {
-                    const monthDate = new Date(month + "-01T00:00:00");
+                    const monthDate = parseLocalDate(month + "-01");
                     const monthLabel = monthDate.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
                     return (
                       <div key={month} className="space-y-1">
