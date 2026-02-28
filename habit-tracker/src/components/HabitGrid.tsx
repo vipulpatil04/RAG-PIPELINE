@@ -193,7 +193,7 @@ export function HabitGrid({ habits, view, onEditHabit, onDeleteHabit }: Props) {
                 </div>
                 <div className="flex gap-3 flex-wrap">
                   {Object.entries(monthGroups).map(([month, mDates]) => {
-                    const monthDate = parseLocalDate(month + "-01");
+                    const monthDate = parseLocalDate(`${month}-01`);
                     const monthLabel = monthDate.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
                     return (
                       <div key={month} className="space-y-1">

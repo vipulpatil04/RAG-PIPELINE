@@ -7,8 +7,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: PrismaAdapter(prisma),
   providers: [
     Google({
-      clientId: process.env.AUTH_GOOGLE_ID ?? (() => { throw new Error("AUTH_GOOGLE_ID is not set") })(),
-      clientSecret: process.env.AUTH_GOOGLE_SECRET ?? (() => { throw new Error("AUTH_GOOGLE_SECRET is not set") })(),
+      clientId: process.env.AUTH_GOOGLE_ID,
+      clientSecret: process.env.AUTH_GOOGLE_SECRET,
+      authorization: {
+        params: {
+          prompt: "consent",
+          access_type: "offline",
+          response_type: "code",
+        },
+      },
     }),
   ],
   callbacks: {
